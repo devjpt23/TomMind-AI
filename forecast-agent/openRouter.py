@@ -10,12 +10,25 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-client = OpenAI(
-    base_url="https://openrouter.ai/api/v1",
-    api_key=os.getenv("OPENROUTER_API_KEY"),
-)
+_client: OpenAI | None = None
 
 FORECAST_MODEL = os.getenv("FORECAST_MODEL", "openai/gpt-4o")
+
+
+def _get_client() -> OpenAI | None:
+    """Lazy client so the server can start before env vars are injected (e.g. App Platform)."""
+    global _client
+    if _client is not None:
+        return _client
+    api_key = os.getenv("OPENROUTER_API_KEY")
+    if not api_key:
+        logger.warning("OPENROUTER_API_KEY is not set")
+        return None
+    _client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key,
+    )
+    return _client
 
 ANALYST_SYSTEM = """You help forecasters find recent news for prediction markets.
 Given an event, output 2-3 short Google News search queries (3-8 keywords each).
@@ -63,6 +76,10 @@ def analyst(event_text: str) -> dict:
     fallback_query = _fallback_query_from_event(event_text)
     default = {"queries": [fallback_query], "should_search": True}
 
+    client = _get_client()
+    if client is None:
+        return default
+
     try:
         response = client.chat.completions.create(
             model=FORECAST_MODEL,
@@ -84,6 +101,10 @@ def analyst(event_text: str) -> dict:
 
 
 def forecasterMain(user_prompt: str) -> str:
+    client = _get_client()
+    if client is None:
+        raise RuntimeError("OPENROUTER_API_KEY is not set")
+
     response = client.chat.completions.create(
         model=FORECAST_MODEL,
         messages=[
