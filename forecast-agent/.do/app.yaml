@@ -1,0 +1,44 @@
+# DigitalOcean App Platform — TomMind-AI forecast agent
+# Deploy: DO Control Panel → Apps → Create → GitHub → devjpt23/TomMind-AI
+# Or: doctl apps create --spec .do/app.yaml (after setting secrets in UI)
+
+name: tomind-forecast
+region: nyc
+
+ingress:
+  rules:
+    - component:
+        name: forecast-api
+      match:
+        path:
+          prefix: /
+
+services:
+  - name: forecast-api
+    github:
+      repo: devjpt23/TomMind-AI
+      branch: main
+      deploy_on_push: true
+    source_dir: forecast-agent
+    dockerfile_path: forecast-agent/Dockerfile
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    health_check:
+      http_path: /health
+      initial_delay_seconds: 30
+      period_seconds: 20
+      timeout_seconds: 10
+    envs:
+      - key: OPENROUTER_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: SERPER_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+      - key: CALIBRATE_LAMBDA
+        scope: RUN_TIME
+        value: "0.85"
+      - key: FORECAST_MODEL
+        scope: RUN_TIME
+        value: openai/gpt-4o
