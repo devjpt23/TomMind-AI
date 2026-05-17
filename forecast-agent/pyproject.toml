@@ -1,0 +1,12 @@
+[project]
+name = "forecast-agent"
+version = "0.1.0"
+description = "Prophet Hacks forecasting agent (FastAPI + OpenRouter + Serper)"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.136.1",
+    "openai>=2.37.0",
+    "python-dotenv>=1.2.2",
+    "requests>=2.32.0",
+    "uvicorn>=0.47.0",
+]
