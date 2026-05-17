@@ -16,7 +16,8 @@ from pathlib import Path
 import calibrate
 import market_prior
 import openRouter
-from main import EventRequest, _build_event_text, _build_forecaster_prompt, _gather_news
+import research
+from main import EventRequest, _build_event_text
 
 
 def resolved_to_yes(event: dict) -> float:
@@ -58,8 +59,10 @@ async def predict_one(event: dict) -> tuple[float, float, float, str | None]:
         market_ticker=req.market_ticker,
     )
     event_text = _build_event_text(req)
-    news_block = await asyncio.to_thread(_gather_news, event_text)
-    prompt = _build_forecaster_prompt(req, news_block, ctx.prompt_block)
+    news_block = await asyncio.to_thread(
+        research.gather_news, event_text, req.close_time
+    )
+    prompt = f"{event_text}\n\n{ctx.prompt_block}\n\n{news_block}"
     raw = await asyncio.to_thread(openRouter.forecasterMain, prompt)
     p_raw = openRouter.parse_p_yes(raw)
     p_blend = market_prior.blend_with_market(p_raw, ctx.p_yes)

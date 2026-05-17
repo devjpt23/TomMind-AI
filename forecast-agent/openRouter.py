@@ -45,6 +45,34 @@ Use the event details and news summaries in the user message. Base your forecast
 
 Output your final prediction (a number between 0 and 1) with an asterisk at the beginning and end of the decimal (Ex: *0.42*)."""
 
+BASE_RATE_FORECASTER_SYSTEM = """You are a superforecaster emphasizing the OUTSIDE VIEW (reference class / base rate).
+
+Before using headlines, estimate how often similar events in this category resolve YES.
+Then update modestly using only the news summaries provided — do not overweight vivid stories.
+
+Predict P(YES). You MUST output a probability between 0 and 1.
+Avoid extremes (below 0.05 or above 0.95) unless the evidence is overwhelming.
+
+Output only your final probability with asterisks: *0.42*"""
+
+STRUCTURED_7STEP_FORECASTER_SYSTEM = """You are an expert forecaster. Work through these steps briefly, then give a final probability.
+
+1. Rephrase the resolution question in one sentence.
+2. List the 2 strongest reasons the market resolves NO.
+3. List the 2 strongest reasons the market resolves YES.
+4. Weigh evidence (Tetlock-style: neither anchor on hope nor fear).
+5. State an initial probability.
+6. Calibration check: could you be overconfident? Adjust if needed.
+7. Final probability for YES.
+
+You MUST end with a single number between 0 and 1 in asterisks (Ex: *0.42*)."""
+
+FORECASTER_PROMPTS: dict[str, str] = {
+    "superforecaster": FORECASTER_SYSTEM,
+    "base_rate": BASE_RATE_FORECASTER_SYSTEM,
+    "structured_7step": STRUCTURED_7STEP_FORECASTER_SYSTEM,
+}
+
 
 def _fallback_query_from_event(event_text: str) -> str:
     for line in event_text.splitlines():
@@ -67,7 +95,7 @@ def _normalize_analyst_output(data: dict, fallback_query: str) -> dict:
     return {"queries": queries, "should_search": should_search}
 
 
-def analyst(event_text: str) -> dict:
+def analyst(event_text: str, *, model: str | None = None) -> dict:
     """Generate Serper search queries for a forecast event.
 
     Returns:
@@ -82,7 +110,7 @@ def analyst(event_text: str) -> dict:
 
     try:
         response = client.chat.completions.create(
-            model=FORECAST_MODEL,
+            model=model or FORECAST_MODEL,
             messages=[
                 {"role": "system", "content": ANALYST_SYSTEM},
                 {"role": "user", "content": event_text},
@@ -100,20 +128,31 @@ def analyst(event_text: str) -> dict:
     return _normalize_analyst_output(data, fallback_query)
 
 
-def forecasterMain(user_prompt: str) -> str:
+def forecaster(
+    user_prompt: str,
+    *,
+    model: str | None = None,
+    prompt_id: str = "superforecaster",
+) -> str:
     client = _get_client()
     if client is None:
         raise RuntimeError("OPENROUTER_API_KEY is not set")
 
+    system = FORECASTER_PROMPTS.get(prompt_id, FORECASTER_SYSTEM)
     response = client.chat.completions.create(
-        model=FORECAST_MODEL,
+        model=model or FORECAST_MODEL,
         messages=[
-            {"role": "system", "content": FORECASTER_SYSTEM},
+            {"role": "system", "content": system},
             {"role": "user", "content": user_prompt},
         ],
     )
 
     return response.choices[0].message.content or ""
+
+
+def forecasterMain(user_prompt: str) -> str:
+    """Backward-compatible alias for v2 single-model forecaster."""
+    return forecaster(user_prompt)
 
 
 def parse_p_yes(text: str, fallback: float = 0.5) -> float:

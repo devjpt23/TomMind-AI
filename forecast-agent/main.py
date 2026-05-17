@@ -1,15 +1,10 @@
-"""Forecast agent server.
-
-FastAPI agent that receives events from ``prophet forecast predict`` and returns
-a probability estimate.
-"""
+"""Forecast agent server (v2 baseline — single model)."""
 
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-from datetime import UTC, datetime
 
 import uvicorn
 from fastapi import FastAPI
@@ -18,7 +13,8 @@ from pydantic import BaseModel
 import calibrate
 import market_prior
 import openRouter
-import serperSearch
+import research
+from event_context import build_event_text
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -43,36 +39,14 @@ class PredictionResponse(BaseModel):
 
 
 def _build_event_text(event: EventRequest) -> str:
-    today = datetime.now(UTC).strftime("%Y-%m-%d")
-    parts = [
-        f"Today's Date: {today}",
-        f"Event: {event.title}",
-    ]
-    if event.subtitle:
-        parts.append(f"Subtitle: {event.subtitle}")
-    if event.description:
-        parts.append(f"Description: {event.description}")
-    if event.rules:
-        parts.append(f"Rules: {event.rules}")
-    parts.append(f"Category: {event.category}")
-    parts.append(f"Close time: {event.close_time}")
-    return "\n".join(parts)
-
-
-def _build_forecaster_prompt(
-    event: EventRequest,
-    news_block: str,
-    market_block: str,
-) -> str:
-    return f"{_build_event_text(event)}\n\n{market_block}\n\n{news_block}"
-
-
-def _gather_news(event_text: str) -> str:
-    analysis = openRouter.analyst(event_text)
-    if not analysis.get("should_search", True):
-        return serperSearch.format_news_for_prompt([])
-    items = serperSearch.fetch_news_for_queries(analysis["queries"])
-    return serperSearch.format_news_for_prompt(items)
+    return build_event_text(
+        title=event.title,
+        close_time=event.close_time,
+        subtitle=event.subtitle,
+        description=event.description,
+        category=event.category,
+        rules=event.rules,
+    )
 
 
 @app.get("/health")
@@ -95,8 +69,10 @@ async def predict_endpoint(event: EventRequest) -> PredictionResponse:
             ctx.source,
             f"{ctx.p_yes:.3f}" if ctx.p_yes is not None else "n/a",
         )
-        news_block = await asyncio.to_thread(_gather_news, event_text)
-        prompt = _build_forecaster_prompt(event, news_block, ctx.prompt_block)
+        news_block = await asyncio.to_thread(
+            research.gather_news, event_text, event.close_time
+        )
+        prompt = f"{event_text}\n\n{ctx.prompt_block}\n\n{news_block}"
         raw = await asyncio.to_thread(openRouter.forecasterMain, prompt)
         p_raw = openRouter.parse_p_yes(raw)
         p_blended = market_prior.blend_with_market(p_raw, ctx.p_yes)
