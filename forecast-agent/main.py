@@ -10,10 +10,13 @@ import asyncio
 import logging
 import os
 from datetime import UTC, datetime
+
 import uvicorn
 from fastapi import FastAPI
 from pydantic import BaseModel
+
 import calibrate
+import market_prior
 import openRouter
 import serperSearch
 
@@ -38,6 +41,7 @@ class PredictionResponse(BaseModel):
     p_yes: float
     rationale: str
 
+
 def _build_event_text(event: EventRequest) -> str:
     today = datetime.now(UTC).strftime("%Y-%m-%d")
     parts = [
@@ -55,8 +59,12 @@ def _build_event_text(event: EventRequest) -> str:
     return "\n".join(parts)
 
 
-def _build_forecaster_prompt(event: EventRequest, news_block: str) -> str:
-    return f"{_build_event_text(event)}\n\n{news_block}"
+def _build_forecaster_prompt(
+    event: EventRequest,
+    news_block: str,
+    market_block: str,
+) -> str:
+    return f"{_build_event_text(event)}\n\n{market_block}\n\n{news_block}"
 
 
 def _gather_news(event_text: str) -> str:
@@ -69,7 +77,7 @@ def _gather_news(event_text: str) -> str:
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok"}
+    return {"status": "ok", "version": "v2"}
 
 
 @app.post("/predict", response_model=PredictionResponse)
@@ -77,12 +85,30 @@ async def predict_endpoint(event: EventRequest) -> PredictionResponse:
     logger.info("predict %s :: %s", event.market_ticker, event.title)
     try:
         event_text = _build_event_text(event)
+        ctx = await asyncio.to_thread(
+            market_prior.fetch_market_context,
+            market_ticker=event.market_ticker,
+            title=event.title,
+        )
+        logger.info(
+            "%s market source=%s p_market=%s",
+            event.market_ticker,
+            ctx.source,
+            f"{ctx.p_yes:.3f}" if ctx.p_yes is not None else "n/a",
+        )
         news_block = await asyncio.to_thread(_gather_news, event_text)
-        prompt = _build_forecaster_prompt(event, news_block)
+        prompt = _build_forecaster_prompt(event, news_block, ctx.prompt_block)
         raw = await asyncio.to_thread(openRouter.forecasterMain, prompt)
         p_raw = openRouter.parse_p_yes(raw)
-        p_yes = calibrate.calibrate(p_raw)
-        logger.info("%s p_raw=%.3f p_yes=%.3f", event.market_ticker, p_raw, p_yes)
+        p_blended = market_prior.blend_with_market(p_raw, ctx.p_yes)
+        p_yes = calibrate.calibrate(p_blended)
+        logger.info(
+            "%s p_raw=%.3f p_blend=%.3f p_yes=%.3f",
+            event.market_ticker,
+            p_raw,
+            p_blended,
+            p_yes,
+        )
         return PredictionResponse(p_yes=p_yes, rationale=raw)
     except Exception:
         logger.exception("predict failed for %s", event.market_ticker)

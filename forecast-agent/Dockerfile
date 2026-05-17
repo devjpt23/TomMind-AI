@@ -5,7 +5,7 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock ./
-COPY main.py openRouter.py serperSearch.py calibrate.py ./
+COPY main.py openRouter.py serperSearch.py calibrate.py kalshi_prices.py market_prior.py polymarket.py ./
 
 RUN uv sync --frozen --no-dev
 
