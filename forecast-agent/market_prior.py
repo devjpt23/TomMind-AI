@@ -1,4 +1,4 @@
-"""Market prior: Kalshi first, Polymarket title search as fallback."""
+"""Market prior from Kalshi public API (by market_ticker)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ import os
 from dataclasses import dataclass
 
 import kalshi_prices
-import polymarket
 
 logger = logging.getLogger(__name__)
 
@@ -27,8 +26,8 @@ class MarketContext:
         )
 
 
-def fetch_market_context(*, market_ticker: str, title: str) -> MarketContext:
-    """Kalshi by ticker, then Polymarket search by title if enabled."""
+def fetch_market_context(*, market_ticker: str) -> MarketContext:
+    """Fetch Kalshi snapshot by ticker; empty context if unavailable."""
     snap = kalshi_prices.fetch_market_snapshot(market_ticker)
     if snap and snap.p_yes is not None:
         return MarketContext(
@@ -42,18 +41,6 @@ def fetch_market_context(*, market_ticker: str, title: str) -> MarketContext:
             p_yes=None,
             prompt_block=snap.prompt_block(),
         )
-
-    if os.getenv("POLYMARKET_FALLBACK", "true").lower() in ("1", "true", "yes"):
-        p_poly = polymarket.fetch_yes_price_by_search(title)
-        if p_poly is not None:
-            return MarketContext(
-                source="polymarket",
-                p_yes=p_poly,
-                prompt_block=(
-                    f"Polymarket search fallback (Kalshi ticker not found):\n"
-                    f"  Implied P(Yes): {p_poly:.3f}"
-                ),
-            )
 
     return MarketContext.empty()
 

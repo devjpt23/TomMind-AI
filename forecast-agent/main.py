@@ -88,7 +88,6 @@ async def predict_endpoint(event: EventRequest) -> PredictionResponse:
         ctx = await asyncio.to_thread(
             market_prior.fetch_market_context,
             market_ticker=event.market_ticker,
-            title=event.title,
         )
         logger.info(
             "%s market source=%s p_market=%s",
