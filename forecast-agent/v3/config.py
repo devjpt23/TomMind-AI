@@ -5,11 +5,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-from v3.prompts import DEFAULT_PROMPT_CYCLE
+from v3.prompts import DEFAULT_MODEL_PROMPTS, DEFAULT_PROMPT_CYCLE
 
 DEFAULT_ENSEMBLE_MODELS = (
     "openai/gpt-4o",
-    "deepseek/deepseek-r1",
+    "microsoft/phi-4",
     "google/gemini-3.1-flash-lite",
 )
 
@@ -28,11 +28,18 @@ def ensemble_models() -> tuple[str, ...]:
     return tuple(parts) if parts else DEFAULT_ENSEMBLE_MODELS
 
 
+def _prompt_for_model(model_id: str, index: int) -> str:
+    """Explicit model->prompt map, else cycle (custom ENSEMBLE_MODELS lists)."""
+    return DEFAULT_MODEL_PROMPTS.get(
+        model_id,
+        DEFAULT_PROMPT_CYCLE[index % len(DEFAULT_PROMPT_CYCLE)],
+    )
+
+
 def ensemble_members() -> tuple[EnsembleMember, ...]:
-    """Map each model to a distinct forecaster prompt (cycle if fewer prompts than models)."""
     models = ensemble_models()
     return tuple(
-        EnsembleMember(model_id=m, prompt_id=DEFAULT_PROMPT_CYCLE[i % len(DEFAULT_PROMPT_CYCLE)])
+        EnsembleMember(model_id=m, prompt_id=_prompt_for_model(m, i))
         for i, m in enumerate(models)
     )
 

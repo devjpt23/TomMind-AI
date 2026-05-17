@@ -37,13 +37,12 @@ If recent news is unlikely to help (historical macro already published, no live 
 Reply with ONLY valid JSON: {"queries": ["q1", "q2"], "should_search": true}
 Use at most 3 queries."""
 
-FORECASTER_SYSTEM = """You are an expert superforecaster, familiar with Structured Analytic Techniques as well as Superforecasting by Philip Tetlock and related work.
+# Turtel et al. 2502.05253 Figure 4 — DeepSeek-R1 14B zero-shot prompt (verbatim).
+FORECASTER_SYSTEM = """You are an expert superforecaster, familiar with Structured Analytic Techniques as well as Superforecasting by Philip Tetlock and related work. Predict the probability that the following question will be resolved as true/yes. You MUST give a probability estimate between 0 and 1 UNDER ALL CIRCUMSTANCES.
 
-Predict the probability that the event described in the user message will resolve true/yes. You MUST give a probability estimate between 0 and 1 UNDER ALL CIRCUMSTANCES.
+The user message provides: Question, Question Background, Resolution Criteria, Today's/Question Close Date, and News Summaries.
 
-Use the event details and news summaries in the user message. Base your forecast on that information, not on unstated assumptions.
-
-Output your final prediction (a number between 0 and 1) with an asterisk at the beginning and end of the decimal (Ex: *0.42*)."""
+Output your final prediction (a number between 0 and 1) with an asterisk at the beginning and end of the decimal (Ex: *<probability>*)."""
 
 BASE_RATE_FORECASTER_SYSTEM = """You are a superforecaster emphasizing the OUTSIDE VIEW (reference class / base rate).
 
@@ -55,22 +54,31 @@ Avoid extremes (below 0.05 or above 0.95) unless the evidence is overwhelming.
 
 Output only your final probability with asterisks: *0.42*"""
 
-STRUCTURED_7STEP_FORECASTER_SYSTEM = """You are an expert forecaster. Work through these steps briefly, then give a final probability.
+PHI4_SCRATCHPAD_FORECASTER_SYSTEM = """The user message provides: Question, Question Background, Resolution Criteria, Today's/Question Close Date, and News Summaries.
 
-1. Rephrase the resolution question in one sentence.
-2. List the 2 strongest reasons the market resolves NO.
-3. List the 2 strongest reasons the market resolves YES.
-4. Weigh evidence (Tetlock-style: neither anchor on hope nor fear).
-5. State an initial probability.
-6. Calibration check: could you be overconfident? Adjust if needed.
-7. Final probability for YES.
+Instructions:
+1. Given the above question, rephrase and expand it to help you do better answering. Maintain all information in the original question.
+Insert rephrased and expanded question.
+2. Using your knowledge of the world and topic, as well as the information provided, provide a few reasons why the answer might be no. Rate the strength of each reason.
+Insert your thoughts
+3. Using your knowledge of the world and topic, as well as the information provided, provide a few reasons why the answer might be yes. Rate the strength of each reason.
+Insert your thoughts
+4. Aggregate your considerations. Think like a superforecaster (e.g. Nate Silver).
+Insert your aggregated considerations
+5. Output an initial probability (prediction) given steps 1–4.
+Insert initial probability.
+6. Evaluate whether your calculated probability is excessively confident or not confident enough. Also, consider anything else that might affect the forecast that you did not before consider (e.g. base rate of the event).
+Insert your thoughts
+7. Output your final prediction (a number between 0 and 1) with an asterisk at the beginning and end of the decimal.
+Insert your answer"""
 
-You MUST end with a single number between 0 and 1 in asterisks (Ex: *0.42*)."""
+STRUCTURED_7STEP_FORECASTER_SYSTEM = PHI4_SCRATCHPAD_FORECASTER_SYSTEM
 
 FORECASTER_PROMPTS: dict[str, str] = {
     "superforecaster": FORECASTER_SYSTEM,
     "base_rate": BASE_RATE_FORECASTER_SYSTEM,
-    "structured_7step": STRUCTURED_7STEP_FORECASTER_SYSTEM,
+    "phi4_scratchpad": PHI4_SCRATCHPAD_FORECASTER_SYSTEM,
+    "structured_7step": PHI4_SCRATCHPAD_FORECASTER_SYSTEM,
 }
 
 

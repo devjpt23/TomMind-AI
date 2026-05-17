@@ -1,6 +1,7 @@
 import json
 import logging
 import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import UTC, datetime, timedelta
 
 import requests
@@ -91,22 +92,38 @@ def fetch_news_for_queries(
     days: int = 14,
     as_of: datetime | None = None,
 ) -> list[dict]:
-    """Run Serper for each query and merge results, deduping by URL across queries."""
+    """Run Serper for each query (parallel) and merge, deduping by URL across queries."""
+    if not queries:
+        return []
+
+    workers = min(
+        max(1, int(os.getenv("SERPER_MAX_WORKERS", "3"))),
+        len(queries),
+    )
     seen_links: set[str] = set()
     merged: list[dict] = []
-    for query in queries:
-        if len(merged) >= max_items:
-            break
-        for item in getNews(query, num=num_per_query, days=days, as_of=as_of):
-            link = (item.get("link") or "").strip()
-            if link and link in seen_links:
+
+    def _fetch_one(query: str) -> list[dict]:
+        return getNews(query, num=num_per_query, days=days, as_of=as_of)
+
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_fetch_one, q): q for q in queries}
+        for fut in as_completed(futures):
+            try:
+                batch = fut.result()
+            except Exception as exc:
+                logger.warning("serper parallel fetch failed: %s", exc)
                 continue
-            if link:
-                seen_links.add(link)
-            merged.append(item)
-            if len(merged) >= max_items:
-                break
-    return merged
+            for item in batch:
+                if len(merged) >= max_items:
+                    break
+                link = (item.get("link") or "").strip()
+                if link and link in seen_links:
+                    continue
+                if link:
+                    seen_links.add(link)
+                merged.append(item)
+    return merged[:max_items]
 
 
 def format_news_for_prompt(items: list[dict]) -> str:
