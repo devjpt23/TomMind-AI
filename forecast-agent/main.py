@@ -48,8 +48,25 @@ class MarketProbability(BaseModel):
 
 
 class PredictionResponse(BaseModel):
-    probabilities: list[MarketProbability]
-    rationale: str | None = None
+    """Prophet Hacks / Arena contract: top-level ``probabilities`` list only."""
+
+    probabilities: list[MarketProbability] = Field(min_length=1)
+
+
+def _align_probabilities(
+    event: EventRequest, probs: list[MarketProbability]
+) -> list[MarketProbability]:
+    """One entry per ``outcomes`` label, in slate order (organizer validator)."""
+    markets = _event_markets(event)
+    by_market = {p.market: p.probability for p in probs}
+    aligned: list[MarketProbability] = []
+    for label in markets:
+        if label in by_market:
+            aligned.append(MarketProbability(market=label, probability=by_market[label]))
+        else:
+            u = 1.0 / len(markets)
+            aligned.append(MarketProbability(market=label, probability=u))
+    return aligned
 
 
 def _build_event_text(event: EventRequest) -> str:
@@ -106,14 +123,14 @@ def _predict_v2(event: EventRequest) -> PredictionResponse:
             category=event.category,
             rules=event.rules,
         )
-        return PredictionResponse(
-            probabilities=[
-                MarketProbability(market=m, probability=p) for m, p in dist
-            ],
-            rationale=raw,
-        )
+        probs = [
+            MarketProbability(market=m, probability=p) for m, p in dist
+        ]
+        logger.info("%s multi-outcome n=%d", event.market_ticker, len(probs))
+        return PredictionResponse(probabilities=_align_probabilities(event, probs))
 
     p_yes, raw = _predict_v2_binary(event)
+    logger.info("%s rationale_chars=%d", event.market_ticker, len(raw))
     if len(markets) == 1:
         probs = [MarketProbability(market=markets[0], probability=p_yes)]
     else:
@@ -121,23 +138,24 @@ def _predict_v2(event: EventRequest) -> PredictionResponse:
             MarketProbability(market=markets[0], probability=p_yes),
             MarketProbability(market=markets[1], probability=max(0.0, 1.0 - p_yes)),
         ]
-    return PredictionResponse(probabilities=probs, rationale=raw)
+    return PredictionResponse(probabilities=_align_probabilities(event, probs))
 
 
 def _uniform_fallback(event: EventRequest, note: str) -> PredictionResponse:
+    logger.warning("%s %s", event.market_ticker, note)
     markets = _event_markets(event)
     u = 1.0 / len(markets)
-    return PredictionResponse(
-        probabilities=[
-            MarketProbability(market=m, probability=u) for m in markets
-        ],
-        rationale=note,
-    )
+    probs = [MarketProbability(market=m, probability=u) for m in markets]
+    return PredictionResponse(probabilities=_align_probabilities(event, probs))
 
 
 @app.get("/health")
 async def health() -> dict[str, str]:
-    return {"status": "ok", "version": FORECAST_VERSION}
+    return {
+        "status": "ok",
+        "version": FORECAST_VERSION,
+        "response_format": "probabilities",
+    }
 
 
 @app.post("/predict", response_model=PredictionResponse)
@@ -176,7 +194,7 @@ async def predict_endpoint(event: EventRequest) -> PredictionResponse:
                     ),
                 ]
             return PredictionResponse(
-                probabilities=probs, rationale=out.get("rationale", "")
+                probabilities=_align_probabilities(event, probs)
             )
 
         return await asyncio.to_thread(_predict_v2, event)
