@@ -73,9 +73,18 @@ def predict_remote(
         resp = requests.post(agent_url, json=payload, timeout=timeout)
         resp.raise_for_status()
         data = resp.json()
-    p_yes = float(data["p_yes"])
     rationale = data.get("rationale") or ""
-    return p_yes, rationale
+    if "p_yes" in data and data["p_yes"] is not None:
+        return float(data["p_yes"]), rationale
+    probs = data.get("probabilities") or []
+    outcomes = payload.get("outcomes") or []
+    if outcomes and probs:
+        by_market = {p["market"]: float(p["probability"]) for p in probs}
+        if outcomes[0] in by_market:
+            return by_market[outcomes[0]], rationale
+    if probs:
+        return float(probs[0]["probability"]), rationale
+    raise KeyError("response missing p_yes and probabilities")
 
 
 def run_eval(

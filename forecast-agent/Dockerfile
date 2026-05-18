@@ -8,7 +8,7 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev
 
 COPY main.py openRouter.py serperSearch.py calibrate.py kalshi_prices.py market_prior.py \
-    event_context.py research.py ./
+    event_context.py research.py multi_forecast.py ./
 COPY v3 ./v3
 
 ENV PATH="/app/.venv/bin:$PATH"
