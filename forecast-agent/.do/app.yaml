@@ -36,9 +36,15 @@ services:
       - key: SERPER_API_KEY
         scope: RUN_TIME
         type: SECRET
+      - key: SERPER2_API_KEY
+        scope: RUN_TIME
+        type: SECRET
       - key: CALIBRATE_LAMBDA
         scope: RUN_TIME
         value: "0.85"
       - key: FORECAST_MODEL
         scope: RUN_TIME
         value: openai/gpt-4o
+      - key: FORECAST_VERSION
+        scope: RUN_TIME
+        value: v2

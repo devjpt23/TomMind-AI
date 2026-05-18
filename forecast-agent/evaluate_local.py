@@ -14,8 +14,10 @@ import sys
 from pathlib import Path
 
 import calibrate
+import market_prior
 import openRouter
-from main import EventRequest, _build_event_text, _build_forecaster_prompt, _gather_news
+import research
+from main import EventRequest, _build_event_text
 
 
 def resolved_to_yes(event: dict) -> float:
@@ -40,7 +42,8 @@ def _close_time_str(event: dict) -> str:
     return ct if isinstance(ct, str) else ct.isoformat().replace("+00:00", "Z")
 
 
-async def predict_one(event: dict) -> tuple[float, float]:
+async def predict_one(event: dict) -> tuple[float, float, float, str | None, str]:
+    """Returns (p_raw, p_blend, p_yes, market_source, p_source). Matches main.py v2 pipeline."""
     req = EventRequest(
         event_ticker=event["event_ticker"],
         market_ticker=event["market_ticker"],
@@ -51,32 +54,65 @@ async def predict_one(event: dict) -> tuple[float, float]:
         rules=event.get("rules"),
         close_time=_close_time_str(event),
     )
+    ctx = await asyncio.to_thread(
+        market_prior.fetch_market_context,
+        market_ticker=req.market_ticker,
+    )
     event_text = _build_event_text(req)
-    news_block = await asyncio.to_thread(_gather_news, event_text)
-    prompt = _build_forecaster_prompt(req, news_block)
-    raw = await asyncio.to_thread(openRouter.forecasterMain, prompt)
-    p_raw = openRouter.parse_p_yes(raw)
-    return p_raw, calibrate.calibrate(p_raw)
+    news_block = await asyncio.to_thread(
+        research.gather_news,
+        event_text,
+        req.close_time,
+        category=req.category,
+    )
+    prompt = f"{event_text}\n\n{ctx.prompt_block}\n\n{news_block}"
+    parsed = await asyncio.to_thread(
+        openRouter.forecast_and_parse, prompt, category=req.category
+    )
+    p_raw = parsed["p_yes"]
+    p_source = parsed["p_source"]
+    p_blend = market_prior.blend_with_market(p_raw, ctx.p_yes)
+    p_yes = calibrate.calibrate(p_blend)
+    return p_raw, p_blend, p_yes, ctx.source, p_source
 
 
-async def run_eval(events: list[dict]) -> None:
-    rows: list[tuple[str, float, float]] = []
-    for i, event in enumerate(events, 1):
+async def run_eval(events: list[dict], concurrency: int = 1) -> None:
+    total = len(events)
+    sem = asyncio.Semaphore(max(1, concurrency))
+    rows: list[tuple[int, str, float, float, str]] = []
+
+    async def _run(i: int, event: dict) -> tuple[int, str, float, float, str]:
         ticker = event["market_ticker"]
         actual = resolved_to_yes(event)
-        print(f"[{i}/{len(events)}] {ticker} (actual={actual:.0f}) ...", flush=True)
-        try:
-            p_raw, p_yes = await predict_one(event)
-        except Exception as exc:
-            print(f"  FAILED: {exc}", file=sys.stderr)
-            p_raw, p_yes = 0.5, 0.5
-        rows.append((ticker, p_yes, actual))
+        print(f"[{i}/{total}] {ticker} (actual={actual:.0f}) ...", flush=True)
+        async with sem:
+            try:
+                p_raw, p_blend, p_yes, mkt_src, p_source = await predict_one(event)
+            except Exception as exc:
+                print(f"  FAILED {ticker}: {exc}", file=sys.stderr)
+                p_raw, p_blend, p_yes, mkt_src, p_source = 0.5, 0.5, 0.5, None, "parser_fallback"
         err = (p_yes - actual) ** 2
-        print(f"  p_raw={p_raw:.3f} p_yes={p_yes:.3f}  brier_contrib={err:.4f}")
+        print(
+            f"  [{i}] market={mkt_src} p_source={p_source} p_raw={p_raw:.3f} "
+            f"p_blend={p_blend:.3f} p_yes={p_yes:.3f}  brier_contrib={err:.4f}",
+            flush=True,
+        )
+        return i, ticker, p_yes, actual, p_source
 
-    brier = sum((p - a) ** 2 for _, p, a in rows) / len(rows)
+    results = await asyncio.gather(*[_run(i, e) for i, e in enumerate(events, 1)])
+    rows.extend(results)
+    rows.sort(key=lambda r: r[0])
+
+    brier = sum((p - a) ** 2 for _, _, p, a, _ in rows) / len(rows)
+    fallback_n = sum(1 for *_, src in rows if src == "parser_fallback")
+    commitment_n = sum(1 for *_, src in rows if src == "commitment")
+    evidence_clamp_n = sum(1 for *_, src in rows if src == "evidence_clamp")
     print()
-    print(f"Markets scored: {len(rows)}")
+    print(f"Markets scored:  {len(rows)}")
+    print(f"Concurrency:     {concurrency}")
+    print(f"p_source=parser_fallback: {fallback_n} / {len(rows)}")
+    print(f"p_source=commitment:    {commitment_n} / {len(rows)}")
+    print(f"p_source=evidence_clamp: {evidence_clamp_n} / {len(rows)}")
     print(f"Brier score:     {brier:.4f}  (lower is better)")
     print(f"Naive baseline:  0.2500  (always predict 0.5)")
     if brier < 0.25:
@@ -93,6 +129,12 @@ def main() -> None:
         help="Events JSON (default: smallTest 5-market slice; use ../../eval_resolved.json for full 26)",
     )
     parser.add_argument("--limit", type=int, default=0, help="Max events (0 = all)")
+    parser.add_argument(
+        "--concurrency",
+        type=int,
+        default=1,
+        help="Markets in flight at once (default 1; try 2 for faster eval)",
+    )
     args = parser.parse_args()
 
     path = Path(args.events)
@@ -103,7 +145,7 @@ def main() -> None:
     if not events:
         raise SystemExit("No events to evaluate.")
 
-    asyncio.run(run_eval(events))
+    asyncio.run(run_eval(events, concurrency=args.concurrency))
 
 
 if __name__ == "__main__":

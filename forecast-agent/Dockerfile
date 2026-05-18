@@ -5,9 +5,11 @@ WORKDIR /app
 RUN pip install --no-cache-dir uv
 
 COPY pyproject.toml uv.lock ./
-COPY main.py openRouter.py serperSearch.py calibrate.py ./
-
 RUN uv sync --frozen --no-dev
+
+COPY main.py openRouter.py serperSearch.py calibrate.py kalshi_prices.py market_prior.py \
+    event_context.py research.py ./
+COPY v3 ./v3
 
 ENV PATH="/app/.venv/bin:$PATH"
 ENV PORT=8080

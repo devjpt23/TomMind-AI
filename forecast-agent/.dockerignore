@@ -3,4 +3,9 @@ __pycache__
 .env
 .git
 *.pyc
+*.log
 evaluate_local.py
+evaluate_remote.py
+evaluate_v3_local.py
+convert_prophet_arena.py
+v3/smoke.py
